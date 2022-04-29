@@ -1,0 +1,50 @@
+# Node.js
+# Build a general Node.js project with npm.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- master
+- develop
+
+pr:
+- master
+- develop
+
+resources:
+  repositories:
+  - repository: lifestyle-ci
+    type: github
+    name: GolfNowEng/lifestyle-ci
+    endpoint: EDGE Automation - GitHub
+
+stages:
+- stage: Build
+  jobs:
+  - job: Build
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - template: azure-pipelines/checkout-lifestyle-ci.yml@lifestyle-ci
+      parameters:
+        githubPat: $(GitHub.PAT)
+    - template: azure-pipelines/nodejs/azure-pipelines.yml@lifestyle-ci
+      parameters:
+        codeCovToken: $(CODECOV_TOKEN)
+
+- stage: Dev
+  jobs:
+  - deployment: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    environment: $(Build.DefinitionName)-dev
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: azure-pipelines/nodejs/sls-deploy-steps.yml@lifestyle-ci
+            parameters:
+              env: dev
+              aws_region: us-west-2
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))

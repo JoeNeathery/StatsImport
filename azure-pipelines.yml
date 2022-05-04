@@ -1,12 +1,9 @@
-# Node.js
-# Build a general Node.js project with npm.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+name: $(Build.DefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
 
 trigger:
-- master
-- develop
-
+  - master
+  - develop
+  - release/*
 pr:
 - master
 - develop
@@ -48,3 +45,71 @@ stages:
               aws_region: us-west-2
   dependsOn: Build
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+
+- stage: UAT
+  jobs:
+  - deployment: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    environment: $(Build.DefinitionName)-uat
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: azure-pipelines/nodejs/sls-deploy-steps.yml@lifestyle-ci
+            parameters:
+              env: uat
+              aws_region: us-west-2
+  dependsOn: Dev
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+
+- stage: Stage
+  jobs:
+  - deployment: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    environment: $(Build.DefinitionName)-stage
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: azure-pipelines/nodejs/sls-deploy-steps.yml@lifestyle-ci
+            parameters:
+              env: stage
+              aws_region: us-west-2
+  dependsOn: Build
+  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
+
+- stage: Production
+  jobs:
+  - deployment: Deploy
+    pool:
+      vmImage: ubuntu-latest
+    environment: $(Build.DefinitionName)-production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: azure-pipelines/nodejs/sls-deploy-steps.yml@lifestyle-ci
+            parameters:
+              env: production
+              aws_region: us-east-1
+  - job: Tag
+    steps:
+      - script: |
+          git config --global user.email "$EMAIL"
+          git config --global user.name "$USERNAME"
+          git tag -a $TAG -m "$URI"
+          git push https://$USERNAME:$PAT@github.com/$REPO.git $TAG
+        displayName: git tag v$(Build.SourceBranchName)$(Build.BuildId)
+        workingDirectory: $(Build.SourcesDirectory)
+        env:
+          PAT: $(GitHub.PAT)
+          EMAIL: $(Git.User.Email)
+          USERNAME: $(Git.User.Name)
+          REPO: $(Build.Repository.ID)
+          URI: $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)
+          TAG: $(Build.SourceBranchName).$(Build.BuildId)
+    dependsOn: Deploy
+  dependsOn: Stage
+  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/release/'))
